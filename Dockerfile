@@ -1,8 +1,9 @@
 FROM node:20-alpine
-WORKDIR /app
-COPY package.json ./
+WORKDIR /app/server
+COPY server/package*.json ./
 RUN npm install --omit=dev
-COPY server.js schema.sql ./
-RUN mkdir -p uploads
+COPY server/ ./
+COPY web/ /app/web/
+ENV NODE_ENV=production
 EXPOSE 3000
-CMD ["node","server.js"]
+CMD ["npm", "start"]
