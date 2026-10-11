@@ -1,9 +1,6 @@
 .git
-.github
 .env
-.env.*
-!.env.example
 **/node_modules
-**/.DS_Store
-outputs
 work
+outputs
+*.log
