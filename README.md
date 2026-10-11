@@ -1,63 +1,43 @@
 # Durga Puja Samiti Management App
 
-Responsive Bengali/English dashboard for committee donations, expenses, budget planning, fund balance, search, summary reports, real Excel workbooks, and browser print/PDF. The Railway deployment runs the Node API and web UI together on one same-origin service, with PostgreSQL as a separate Railway database.
+Responsive Bengali-first Durga Puja committee app with PostgreSQL, Admin/User login, transaction entry and history, budgets, available-fund totals, search, reports, CSV export compatible with Excel, and browser print / Save as PDF.
 
-## Roles
+## Repository layout and Docker context
 
-- **Admin:** create Admin/User accounts, record donations and expenses, add budgets, delete erroneous transactions, view reports, and export Excel.
-- **User:** read-only access to dashboard, fund totals, transaction search, reports, and Excel export. The API enforces this; hiding buttons in the UI is not the only protection.
+The repository root contains `Dockerfile`, `railway.toml`, and the `server/` and `web/` directories. The root Dockerfile is for Railway and must be built with the repository root (`/`) as its build context. Its `COPY server/...` and `COPY web/...` paths are relative to that root. Do not set Railway's Root Directory to `/server` when using this root Dockerfile.
 
-The first Admin is created at `/` after the app initializes its database schema. The setup form requires the one-time `FIRST_ADMIN_SETUP_KEY`; the endpoint closes after the first account. Passwords are bcrypt hashed. JWT tokens expire after 12 hours and are kept in browser memory (reloading requires signing in again).
+`server/Dockerfile` remains for the local Docker Compose API service, whose build context is `./server`. `docker-compose.yml` also starts PostgreSQL and the separate local Nginx frontend.
 
 ## Local run with Docker Compose
 
-1. Install Docker Desktop/Engine with Compose.
-2. Copy `.env.example` to `.env`. Replace `POSTGRES_PASSWORD`, `JWT_SECRET`, and `FIRST_ADMIN_SETUP_KEY` with separate random hex values. Example PowerShell command to generate each: `[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`. Keep `.env` out of Git.
-3. Run `docker compose up --build` from the project root.
-4. Open `http://localhost:8080` and create the initial Admin using the `FIRST_ADMIN_SETUP_KEY` from `.env`.
-5. Add user accounts in the Admin-only Users tab.
+1. Install Docker Desktop or Docker Engine with Compose.
+2. Copy `.env.example` to `.env`, then replace `POSTGRES_PASSWORD` and `JWT_SECRET` with long random secrets. Never commit `.env`.
+3. Run `docker compose up --build` from the repository root.
+4. Open `http://localhost:8080`; create the first Admin account.
+5. Admins can create User accounts. Users have read-only access; only Admins can create transactions/budgets, manage accounts, or delete transactions.
 
-The local Compose setup runs PostgreSQL 16, the API, and Nginx. The API also serves the web files itself so Railway can deploy a single web/API service. Both paths use the same `/api` URLs.
+## Deploy on Railway from GitHub
 
-To run the Node service directly, install Node.js 20+ and run `cd server; npm install; npm start` after setting `DATABASE_URL` to a PostgreSQL database URL, `JWT_SECRET`, and `FIRST_ADMIN_SETUP_KEY` (at least 32 characters while the database is empty). The server applies the idempotent initial schema from `server/schema.sql` before opening its port.
+This repository deploys as a single Railway service: the root Dockerfile installs the API, copies the web UI into the API image, initializes the schema on startup, and serves the app and `/api` from the same origin.
 
-## Exact Railway deployment steps
+1. Upload the **contents** of this project folder to the root of a GitHub repository. The root must show `Dockerfile`, `railway.toml`, `server/`, and `web/` (not an extra wrapper folder containing all four).
+2. In Railway, create a project and add a PostgreSQL service.
+3. Add a service from the GitHub repository and select the branch you uploaded.
+4. In that app service's Settings → Build, leave Root Directory blank or set it to `/`. Select Dockerfile as the builder if the dashboard asks. Use the repository-root `Dockerfile`; the included `railway.toml` also specifies it.
+5. Add these app-service variables:
+   - `DATABASE_URL=${{Postgres.DATABASE_URL}}` (replace `Postgres` with your database service's exact name if different).
+   - `JWT_SECRET` = a long random secret (at least 32 random bytes).
+   - `NODE_ENV=production`.
+   - `PGSSL=true` only if your PostgreSQL endpoint requires TLS; otherwise omit it.
+6. Deploy. The app creates its tables from `server/schema.sql` at startup. Wait for `/api/health` to pass, then in Settings → Networking generate a public domain.
+7. Open the domain and create the first Admin. The first-Admin setup route becomes unavailable after an Admin account exists. Sign in, then use Users to create accounts for committee members.
+8. Verify the generated domain loads the Bengali UI and test Admin/User permissions, a donation and expense entry, budget, available-fund total, search/report, CSV download in Excel, and Print → Save as PDF. Back up the Railway database before entering live records and periodically afterward.
 
-1. Extract this project, commit the project root to a GitHub repository, and push it. The repository root contains `Dockerfile` and `railway.toml`; keep the Railway service root directory at the repository root.
-2. In Railway, create a project and choose **Deploy from GitHub repo**. Select the repository. Railway detects the root `Dockerfile`; it builds the Node API and bundles `web/` into that service.
-3. In the project canvas, choose **+ New → Database → PostgreSQL**. Wait for PostgreSQL deployment to finish.
-4. Open the app service's **Variables** tab and add:
+Railway uses a Dockerfile it detects at the source root, and Root Directory controls the source tree available to the build. The root Dockerfile in this project is aligned to that layout. See [Railway Dockerfiles](https://docs.railway.com/builds/dockerfiles) and [Railway build configuration](https://docs.railway.com/builds/build-configuration).
 
-   ```text
-   NODE_ENV=production
-   JWT_SECRET=<a unique random value of at least 32 characters>
-   FIRST_ADMIN_SETUP_KEY=<a different random value of at least 32 characters>
-   DATABASE_URL=${{Postgres.DATABASE_URL}}
-   ```
+## Current limitations
 
-   Replace `Postgres` with the actual database service name if you named it differently. Prefer Railway's **Add Reference Variable** selector so the app follows any later database credential changes. Do not set a literal database password in source control. Railway supplies `PORT`; do not hardcode it. Leave `WEB_ORIGIN` unset because the UI and API share one origin. Leave `PGSSL` unset/false unless your selected connection endpoint requires TLS; if enabling it, this app validates the server certificate.
-
-5. Redeploy the app service after saving variables. `railway.toml` selects the root Dockerfile and checks `/api/health`. The app applies `server/schema.sql` on startup. Confirm the deployment logs say `API and web app ready` and the health check succeeds.
-6. Open app service **Settings → Networking → Generate Domain**. Visit the generated HTTPS domain; the page should show Admin/User login or first-Admin setup.
-7. Create the first Admin on the setup screen with `FIRST_ADMIN_SETUP_KEY`, sign in, then remove that variable from the app service and redeploy. Setup remains permanently closed after the first account. Create User accounts from **Users**. Run a small test donation, test expense, budget, report, and Excel download before entering genuine committee data.
-8. Set up and periodically verify PostgreSQL backups in Railway. This app does not create or verify backups for you. Keep a separate record of the generated `JWT_SECRET`; rotating it invalidates existing sessions/tokens.
-
-Railway dashboard labels can change; the service reference syntax and PostgreSQL connection variables above follow Railway's current documentation. The PostgreSQL service should remain private; only the app service needs a public domain.
-
-## Checks performed on the supplied project
-
-The project was run locally against a disposable PostgreSQL-compatible PGlite test server through the standard PostgreSQL wire protocol. Checks covered first-Admin setup/lockout, Admin login and account creation, User login/read access, User denials on transaction/budget/delete writes, donation/expense/fund arithmetic, budget totals, date-filtered reports, text/type search, amount validation, Admin deletion balance recalculation, unauthenticated export denial, and a valid XLSX workbook response. Browser checks at a 390 px mobile viewport covered Admin navigation, entry and report views, User read-only navigation, no horizontal overflow, and a real Excel download.
-
-The in-memory PGlite instance is not a substitute for deployment smoke testing on Railway's managed PostgreSQL. No Railway account or project was connected, so no live Railway deployment was made.
-
-See [VERIFICATION.md](VERIFICATION.md) for the individual checks and the items not run.
-
-## Known limitations
-
-- Reports summarize matching transactions, while budgets are shown as a separate aggregate; no monthly/category budget-versus-actual report is generated.
-- Search UI displays at most 1,000 newest matching records; Excel exports every matching record.
-- PDF is generated with the browser Print → Save as PDF flow, not a server-side PDF service.
-- There is no password reset, MFA, invite flow, user edit/deactivate screen, or audit history for deletions.
-- Initial database creation is idempotent, but there is no versioned migration framework or built-in backup/restore process.
-- Rate limiting is in process memory; for a multi-replica service, use a shared rate-limit store.
-- The browser keeps JWT only in memory, so reloads require sign-in again. Expired or stolen tokens remain valid until their 12-hour expiration unless the signing secret is rotated.
+- Export is CSV (opens in Excel), not a native `.xlsx` workbook.
+- PDF is generated by the browser print dialog, not by the server.
+- Search/history is capped at 1,000 rows; there is no audit log for deleted transactions, password reset, MFA, or scheduled database backup.
+- This archive has no automated test suite. Local integration checks require Docker/PostgreSQL.
